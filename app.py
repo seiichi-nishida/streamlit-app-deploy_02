@@ -56,13 +56,15 @@ if not "initialized" in st.session_state:
 ############################################################
 # 4. 初期表示
 ############################################################
-# タイトル表示
+
+
+# 画面中央部にタイトルを表示
 cn.display_app_title()
 
-# モード表示
-cn.display_select_mode()
+# サイドバー上部にモード選択・説明・入力例をまとめて表示（タイトルは含めない）
+cn.display_sidebar_mode_and_info()
 
-# AIメッセージの初期表示
+# AIメッセージの初期表示（中央部は挨拶のみ）
 cn.display_initial_ai_message()
 
 

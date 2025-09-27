@@ -121,21 +121,31 @@ def initialize_retriever():
     # 埋め込みモデルの用意
     embeddings = OpenAIEmbeddings()
     
+
     # チャンク分割用のオブジェクトを作成
     text_splitter = CharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
+        chunk_size=ct.CHUNK_SIZE,
+        chunk_overlap=ct.CHUNK_OVERLAP,
         separator="\n"
     )
 
-    # チャンク分割を実施
+
+    # チャンク分割を実施し、docx等でpage情報がある場合は必ず引き継ぐ
     splitted_docs = text_splitter.split_documents(docs_all)
+    for i, chunk in enumerate(splitted_docs):
+        # 元のdocx等でpage情報があれば必ず引き継ぐ
+        if "page" not in chunk.metadata:
+            # 元ドキュメントを探す
+            for doc in docs_all:
+                if doc.metadata.get("source") == chunk.metadata.get("source") and "page" in doc.metadata:
+                    chunk.metadata["page"] = doc.metadata["page"]
+                    break
 
     # ベクターストアの作成
     db = Chroma.from_documents(splitted_docs, embedding=embeddings)
 
     # ベクターストアを検索するRetrieverの作成
-    st.session_state.retriever = db.as_retriever(search_kwargs={"k": 3})
+    st.session_state.retriever = db.as_retriever(search_kwargs={"k": 5})
 
 
 def initialize_session_state():
@@ -199,6 +209,7 @@ def recursive_file_check(path, docs_all):
         file_load(path, docs_all)
 
 
+
 def file_load(path, docs_all):
     """
     ファイル内のデータ読み込み
@@ -212,12 +223,41 @@ def file_load(path, docs_all):
     # ファイル名（拡張子を含む）を取得
     file_name = os.path.basename(path)
 
+    # docxの場合は独自ローダーでページ情報を付与
+    if file_extension == ".docx":
+        docs = load_docx_with_pageinfo(path)
+        docs_all.extend(docs)
+        return
+
     # 想定していたファイル形式の場合のみ読み込む
     if file_extension in ct.SUPPORTED_EXTENSIONS:
-        # ファイルの拡張子に合ったdata loaderを使ってデータ読み込み
         loader = ct.SUPPORTED_EXTENSIONS[file_extension](path)
         docs = loader.load()
         docs_all.extend(docs)
+
+
+# docxを改ページまたは一定文字数ごとに分割し、page番号を付与
+def load_docx_with_pageinfo(path, chunk_size=800):
+    from langchain.schema import Document as LangchainDocument
+    from docx import Document as DocxDocument
+    docs = []
+    doc = DocxDocument(path)
+    buffer = ""
+    page = 1
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        buffer += text + "\n"
+        # 改ページ（段落の改ページ）またはchunk_size超えで分割
+        if para._element.xpath('.//w:br[@w:type="page"]') or len(buffer) > chunk_size:
+            docs.append(LangchainDocument(page_content=buffer.strip(), metadata={"source": path, "page": page}))
+            buffer = ""
+            page += 1
+    # 残りも追加
+    if buffer.strip():
+        docs.append(LangchainDocument(page_content=buffer.strip(), metadata={"source": path, "page": page}))
+    return docs
 
 
 def adjust_string(s):
